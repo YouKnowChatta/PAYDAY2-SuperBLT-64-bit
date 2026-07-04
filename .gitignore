@@ -10,3 +10,5 @@
 
 # tmp file
 /src/Resource.aps
+build/
+out/
