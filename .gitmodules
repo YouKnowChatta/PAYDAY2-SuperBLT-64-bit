@@ -22,3 +22,6 @@
 [submodule "lib/sys/psl-list"]
 	path = lib/sys/psl-list
 	url = https://github.com/publicsuffix/list.git
+[submodule "lib/DieselFormats"]
+	path = lib/DieselFormats
+	url = https://github.com/HW12Dev/DieselFormats.git
