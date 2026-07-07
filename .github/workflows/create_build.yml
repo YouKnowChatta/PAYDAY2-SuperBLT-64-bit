@@ -39,7 +39,7 @@ jobs:
       shell: bash
 
     - name: Add msbuild to PATH
-      uses: microsoft/setup-msbuild@v2
+      uses: microsoft/setup-msbuild@v3
 
       # Step 5: Build the project
     - name: Build with CMake and MSBuild
