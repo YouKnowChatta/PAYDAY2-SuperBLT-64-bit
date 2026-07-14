@@ -319,7 +319,7 @@ add_custom_command(
 	VERBATIM
 )
 
-add_library(WSOCK32 SHARED loader/loader.cpp loader/loader.asm src/Resource.rc "${LOADER_GEN_ASM}" "${LOADER_GEN_DEF}")
+add_library(WSOCK32 SHARED loader/loader.cpp loader/loader_manual_asm.asm src/Resource.rc "${LOADER_GEN_ASM}" "${LOADER_GEN_DEF}")
 target_link_libraries(WSOCK32 LINK_PRIVATE SuperBLT)
 target_include_directories(WSOCK32 PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/loader")
 
