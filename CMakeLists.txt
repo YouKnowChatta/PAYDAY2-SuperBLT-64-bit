@@ -280,6 +280,7 @@ target_link_libraries(SuperBLT lua51)
 add_library(DieselEngineFormats STATIC
 	lib/DieselFormats/dieselformats/src/diesel/modern/scriptdata.cpp
 	lib/DieselFormats/dieselformats/src/diesel/modern/hash.cpp
+	lib/DieselFormats/dieselformats/src/diesel/modern/modern_shared.cpp
     lib/DieselFormats/dieselformats/src/diesel/shared.cpp
     lib/DieselFormats/dieselformats/src/diesel/animation.cpp
     lib/DieselFormats/dieselformats/src/diesel/font.cpp

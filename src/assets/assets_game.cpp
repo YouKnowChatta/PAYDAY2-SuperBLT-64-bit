@@ -1,6 +1,7 @@
 #include "dbutil/Datastore.h"
 #include "tweaker/db_hooks.h"
 
+#include "convert.h"
 #include "dbutil/Archive.h"
 #include "platform.h"
 #include "subhook.h"
@@ -62,6 +63,49 @@ static std::unordered_set<blt::idstring> GetScriptdataTypes()
 
 static const std::unordered_set<blt::idstring> SCRIPTDATA_TYPES = GetScriptdataTypes();
 
+static void DeleteDatastore(BLTAbstractDataStore* datastore, int refcountId)
+{
+	// Do the same thing as an Archive would
+	// Datastores use this big global reference count system. Objects have an ID, which you can then
+	// use to increment and decrement their reference count.
+	// If we're the last one to use this object - which we almost certainly are - then delete it.
+
+	int datastoreRefCount = DecreaseRefCountById(refcountId);
+	if (datastoreRefCount != 0)
+		return;
+
+	using DtorFn = void (*)(void* thisPtr, bool freeMemory);
+	void* vtable = *(void***)datastore;
+	DtorFn dtor = *(DtorFn*)vtable;
+	dtor(datastore, true);
+}
+
+using ConversionFn = std::function<std::vector<uint8_t>(std::vector<uint8_t>&& origData, const std::string& name)>;
+
+static void ConvertData(Archive* archive, const ConversionFn& conversionFn)
+{
+	// Load the base data
+	size_t rawSize = archive->datastore->size();
+	std::vector<uint8_t> rawData(rawSize);
+	archive->datastore->read(0, rawData.data(), rawSize);
+
+	// We don't need the old datastore any more
+	DeleteDatastore(archive->datastore, archive->datastoreRefCountId);
+	archive->datastore = nullptr;
+	archive->datastoreRefCountId = -1; // Hopefully make any crashes relatively obvious
+
+	// Covert the data
+	std::string filePath = archive->name.ToCXX();
+	std::vector<uint8_t> convertedData = conversionFn(std::move(rawData), filePath);
+
+	archive->length = convertedData.size(); // Read this before std::move
+	archive->datastore = new BLTStringDataStore(std::move(convertedData));
+	archive->datastoreRefCountId = AllocateRefCountId();
+
+	// It's very unlikely, but if this file was somehow marked as compressed, clear that.
+	archive->maybeCompressedSize = 0;
+}
+
 static void hook_load(try_open_t orig, subhook::Hook& hook, void* this_, Archive* archive, blt::idstring* type,
                       blt::idstring* name, unsigned long long u1, unsigned long long u2)
 {
@@ -84,8 +128,7 @@ static void hook_load(try_open_t orig, subhook::Hook& hook, void* this_, Archive
 
 	// Read the probably_not_loaded_flag to see if this archive failed to load - if so try again but also
 	// look for hooks with the fallback bit set
-	bool probably_not_loaded_flag = *(bool*)((char*)archive + 0x38);
-	if (probably_not_loaded_flag)
+	if (archive->probablyNotLoadedFlag)
 	{
 		if (hook_asset_load(blt::idfile(*name, *type), &datastore, &pos, &len, ds_name, true))
 		{
@@ -103,9 +146,6 @@ static void hook_load(try_open_t orig, subhook::Hook& hook, void* this_, Archive
 	// By comparison, a file loaded from DB:create_entry or mod_overrides will be a FileDataStore with
 	// a position of zero.
 
-	if (*name == 0xe3dbc8f3d9152569)
-		printf("testing");
-
 	// No file?
 	if (!archive->datastore)
 		return;
@@ -118,11 +158,14 @@ static void hook_load(try_open_t orig, subhook::Hook& hook, void* this_, Archive
 
 	if (SCRIPTDATA_TYPES.contains(*type))
 	{
-		// TODO find some 32-bit scriptdata to test this with!
+		ConvertData(archive, ConvertScriptData);
 
 		// char msg[100];
-		// snprintf(msg, sizeof(msg), "Loading %016llx.%016llx\n", *name, *type);
+		// snprintf(msg, sizeof(msg), "Loading %016llx.%016llx", *name, *type);
 		// RAIDHOOK_LOG_LOG(msg);
+
+		// Don't attempt any further format conversion.
+		return;
 	}
 }
 

@@ -19,6 +19,16 @@ class PDString
 	{
 	}
 
+	const char* cstr() const
+	{
+		return storage.data;
+	}
+
+	std::string ToCXX() const
+	{
+		return std::string(storage.data, _Mysize);
+	}
+
   private:
 	union
 	{

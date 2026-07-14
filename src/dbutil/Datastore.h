@@ -53,7 +53,7 @@ class BLTStringDataStore : public BLTAbstractDataStore
 	BLTStringDataStore(const BLTStringDataStore&) = delete;
 	BLTStringDataStore& operator=(const BLTStringDataStore&) = delete;
 
-	explicit BLTStringDataStore(std::string contents);
+	explicit BLTStringDataStore(std::vector<uint8_t> contents);
 	virtual size_t read(uint64_t position_in_file, uint8_t* data, size_t length) override;
 	virtual bool close() override;
 	virtual size_t size() const override;
@@ -61,40 +61,5 @@ class BLTStringDataStore : public BLTAbstractDataStore
 	virtual bool good() const override;
 
   private:
-	std::string contents;
-};
-
-/**
- * Lazily invokes a conversion function to upgrade bitness-dependent files to 64-bit.
- */
-class BLTFormatConversionDataStore : public BLTAbstractDataStore
-{
-  public:
-	using ConversionFn = std::function<std::vector<uint8_t>(std::vector<uint8_t>&&)>;
-
-	~BLTFormatConversionDataStore();
-
-	// Delete default crap
-	BLTFormatConversionDataStore(const BLTFormatConversionDataStore&) = delete;
-	BLTFormatConversionDataStore& operator=(const BLTFormatConversionDataStore&) = delete;
-
-	BLTFormatConversionDataStore(ConversionFn&& fn, BLTAbstractDataStore* baseFile, int baseFileRefCountId);
-	virtual size_t read(uint64_t position_in_file, uint8_t* data, size_t length) override;
-	virtual bool close() override;
-	virtual size_t size() const override;
-	virtual bool is_asynchronous() const override;
-	virtual bool good() const override;
-
-  private:
-	void CheckConverted();
-	void DeleteUnderlyingDatastore();
-
-	// The underlying file to convert
-	BLTAbstractDataStore* baseFile = nullptr;
-	int baseFileRefCountId = -1;
-
-	ConversionFn conversionFn;
-	std::vector<uint8_t> convertedData;
-	std::atomic_bool hasConverted = false;
-	std::mutex lock;
+	std::vector<uint8_t> contents;
 };

@@ -456,7 +456,9 @@ bool raidhook::tweaker::dbhook::hook_asset_load(const blt::idfile& asset_file, B
 		}
 		else if (ff->stringLiteral)
 		{
-			auto* ds = new BLTStringDataStore(*ff->stringLiteral);
+			const std::string& str = *ff->stringLiteral;
+			std::vector<uint8_t> data(str.begin(), str.end());
+			auto* ds = new BLTStringDataStore(std::move(data));
 			*out_datastore = ds;
 			*out_len = ds->size();
 		}
