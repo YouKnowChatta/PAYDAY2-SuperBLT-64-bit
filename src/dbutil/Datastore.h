@@ -1,6 +1,9 @@
 #pragma once
 
+#include <functional>
+#include <mutex>
 #include <string>
+#include <vector>
 
 #include <stdint.h>
 
@@ -50,7 +53,7 @@ class BLTStringDataStore : public BLTAbstractDataStore
 	BLTStringDataStore(const BLTStringDataStore&) = delete;
 	BLTStringDataStore& operator=(const BLTStringDataStore&) = delete;
 
-	explicit BLTStringDataStore(std::string contents);
+	explicit BLTStringDataStore(std::vector<uint8_t> contents);
 	virtual size_t read(uint64_t position_in_file, uint8_t* data, size_t length) override;
 	virtual bool close() override;
 	virtual size_t size() const override;
@@ -58,5 +61,5 @@ class BLTStringDataStore : public BLTAbstractDataStore
 	virtual bool good() const override;
 
   private:
-	std::string contents;
+	std::vector<uint8_t> contents;
 };

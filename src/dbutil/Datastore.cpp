@@ -92,7 +92,7 @@ bool BLTFileDataStore::good() const
 
 // BLTStringDataStore
 
-BLTStringDataStore::BLTStringDataStore(std::string contents) : contents(std::move(contents))
+BLTStringDataStore::BLTStringDataStore(std::vector<uint8_t> contents) : contents(std::move(contents))
 {
 }
 
@@ -107,7 +107,7 @@ size_t BLTStringDataStore::read(uint64_t position_in_file, uint8_t* data, size_t
 	if (remaining < length)
 		length = remaining;
 
-	memcpy(data, contents.c_str(), length);
+	memcpy(data, contents.data() + position_in_file, length);
 	return length;
 }
 

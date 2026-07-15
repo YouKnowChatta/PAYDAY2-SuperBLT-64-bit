@@ -1,102 +1,113 @@
-#include "tweaker/db_hooks.h"
 #include "dbutil/Datastore.h"
+#include "tweaker/db_hooks.h"
 
+#include "convert.h"
+#include "dbutil/Archive.h"
 #include "platform.h"
 #include "subhook.h"
+#include "util/util.h"
 
-#define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+
 #include <synchapi.h>
+#include <unordered_set>
 
 using raidhook::tweaker::dbhook::hook_asset_load;
 
-// A wrapper class to store strings in the format that PAYDAY 2 does
-// Since Microsoft might (and it seems they have) change their string class, we
-// need this.
-class PDString
-{
-  public:
-	explicit PDString(std::string str) : s(std::move(str))
-	{
-		data = s.c_str();
-		len = s.length();
-		cap = s.length();
-	}
-
-  private:
-	// The data layout that mirrors RAID's string, must be 24 bytes
-	const char* data;
-	uint8_t padding[12]{};
-	int len;
-	int cap;
-
-	// String that can deal with the actual data ownership
-	std::string s;
-};
-
-static_assert(sizeof(PDString) == 32 + sizeof(std::string), "PDString is the wrong size!");
-
 // The signature is the same for all try_open methods, so one typedef will work for all of them.
-typedef void(__thiscall* try_open_t)(void* this_, void* archive, blt::idstring* type, blt::idstring* name, unsigned long long u1, unsigned long long u2);
+typedef void(__thiscall* try_open_t)(void* this_, void* archive, blt::idstring* type, blt::idstring* name,
+                                     unsigned long long u1, unsigned long long u2);
 
-static void hook_load(try_open_t orig, subhook::Hook& hook, void* this_, void* archive, blt::idstring* type, blt::idstring* name, unsigned long long u1, unsigned long long u2);
+static void hook_load(try_open_t orig, subhook::Hook& hook, void* this_, Archive* archive, blt::idstring* type,
+                      blt::idstring* name, unsigned long long u1, unsigned long long u2);
 
-#define DECLARE_PASSTHROUGH(func)                                                                                                                 \
-	static subhook::Hook hook_##func;                                                                                                               \
-	void stub_##func(void* this_, void* archive, blt::idstring* type, blt::idstring* name, unsigned long long u1, unsigned long long u2) \
-	{                                                                                                                                               \
-		hook_load((try_open_t)func, hook_##func, this_, archive, type, name, u1, u2);                                                                 \
+#define DECLARE_PASSTHROUGH(func)                                                                                 \
+	static subhook::Hook hook_##func;                                                                             \
+	void stub_##func(void* this_, void* archive, blt::idstring* type, blt::idstring* name, unsigned long long u1, \
+	                 unsigned long long u2)                                                                       \
+	{                                                                                                             \
+		hook_load((try_open_t)func, hook_##func, this_, (Archive*)archive, type, name, u1, u2);                   \
 	}
 
-#define DECLARE_PASSTHROUGH_ARRAY(id)                                                                                                           \
-	static subhook::Hook hook_##id;                                                                                                               \
-	void stub_##id(void* this_, void* archive, blt::idstring* type, blt::idstring* name, unsigned long long u1, unsigned long long u2) \
-	{                                                                                                                                             \
-		hook_load((try_open_t)try_open_functions.at(id), hook_##id, this_, archive, type, name, u1, u2);                                            \
+#define DECLARE_PASSTHROUGH_ARRAY(id)                                                                              \
+	static subhook::Hook hook_##id;                                                                                \
+	void stub_##id(void* this_, void* archive, blt::idstring* type, blt::idstring* name, unsigned long long u1,    \
+	               unsigned long long u2)                                                                          \
+	{                                                                                                              \
+		hook_load((try_open_t)try_open_functions.at(id), hook_##id, this_, (Archive*)archive, type, name, u1, u2); \
 	}
 
-// Approximate structure from IDA, zero idea how accurate it is, but we've got the important ones here.
-struct Archive {
-	char char0;
-	uint8_t gap1[15];
-	uint64_t qword10;
-	uint64_t qword18;
-
-	uint64_t position;
-	uint64_t length;
-
-	uint64_t qword30;
-	uint16_t word38;
-	uint8_t gap3A[6];
-	uint64_t qword40;
-
-	struct _RTL_CRITICAL_SECTION rtl_critical_section48;
-	BLTAbstractDataStore* datastore;
-
-	uint32_t dword78;
-};
-
-// This got inlined in the latest build, so we have to recreate it ourselves.
-static void* Archive_ctor(Archive* archive, PDString* pd_name, BLTAbstractDataStore* datastore, int64_t pos, int64_t len, bool ukn)
+static bool IsFileDataStore(void* datastore)
 {
-	archive->position = pos;
-	archive->length = len;
-	archive->qword30 = 0i64;
-	archive->word38 = ukn;
-	archive->qword40 = 0i64;
-
-	#pragma warning(suppress : 6031) // Complains about not using the return data.
-	InitializeCriticalSectionAndSpinCount(&archive->rtl_critical_section48, 0xFA0u);
-
-	archive->datastore = datastore;
-	archive->dword78 = -1;
-	if (datastore)
-		archive->dword78 = Archive_ctor_datastore_thing();
-
-	return archive;
+	void** vtable = *(void***)datastore;
+	void* writeFn = vtable[1];
+	return writeFn == dsl_FileDataStore_write;
 }
 
-static void hook_load(try_open_t orig, subhook::Hook& hook, void* this_, void* archive, blt::idstring* type, blt::idstring* name, unsigned long long u1, unsigned long long u2)
+static std::unordered_set<blt::idstring> GetScriptdataTypes()
+{
+	std::vector<std::string> names = {
+		"continents", "continent",        "dialog", "dialog_index",  "environment",  "mission",       "nav_data",
+		"cover_data", "sequence_manager", "world",  "world_cameras", "world_sounds", "world_setting", "objective",
+		"hint",       "achievment",
+	};
+	std::unordered_set<blt::idstring> result;
+
+	for (const std::string& name : names)
+	{
+		result.insert(blt::idstring_hash(name));
+	}
+
+	return result;
+}
+
+static const std::unordered_set<blt::idstring> SCRIPTDATA_TYPES = GetScriptdataTypes();
+
+static void DeleteDatastore(BLTAbstractDataStore* datastore, int refcountId)
+{
+	// Do the same thing as an Archive would
+	// Datastores use this big global reference count system. Objects have an ID, which you can then
+	// use to increment and decrement their reference count.
+	// If we're the last one to use this object - which we almost certainly are - then delete it.
+
+	int datastoreRefCount = DecreaseRefCountById(refcountId);
+	if (datastoreRefCount != 0)
+		return;
+
+	using DtorFn = void (*)(void* thisPtr, bool freeMemory);
+	void* vtable = *(void***)datastore;
+	DtorFn dtor = *(DtorFn*)vtable;
+	dtor(datastore, true);
+}
+
+using ConversionFn = std::function<std::vector<uint8_t>(std::vector<uint8_t>&& origData, const std::string& name)>;
+
+static void ConvertData(Archive* archive, const ConversionFn& conversionFn)
+{
+	// Load the base data
+	size_t rawSize = archive->datastore->size();
+	std::vector<uint8_t> rawData(rawSize);
+	archive->datastore->read(0, rawData.data(), rawSize);
+
+	// We don't need the old datastore any more
+	DeleteDatastore(archive->datastore, archive->datastoreRefCountId);
+	archive->datastore = nullptr;
+	archive->datastoreRefCountId = -1; // Hopefully make any crashes relatively obvious
+
+	// Covert the data
+	std::string filePath = archive->name.ToCXX();
+	std::vector<uint8_t> convertedData = conversionFn(std::move(rawData), filePath);
+
+	archive->length = convertedData.size(); // Read this before std::move
+	archive->datastore = new BLTStringDataStore(std::move(convertedData));
+	archive->datastoreRefCountId = AllocateRefCountId();
+
+	// It's very unlikely, but if this file was somehow marked as compressed, clear that.
+	archive->maybeCompressedSize = 0;
+}
+
+static void hook_load(try_open_t orig, subhook::Hook& hook, void* this_, Archive* archive, blt::idstring* type,
+                      blt::idstring* name, unsigned long long u1, unsigned long long u2)
 {
 	// Try hooking this asset, and see if we need to handle it differently
 	BLTAbstractDataStore* datastore = nullptr;
@@ -108,13 +119,8 @@ static void hook_load(try_open_t orig, subhook::Hook& hook, void* this_, void* a
 	// That just means making our own version of of the archive
 	if (found)
 	{
-		PDString pd_name(ds_name);
-		Archive_ctor((Archive*) archive, &pd_name, datastore, pos, len, false);
+		Archive::Constructor(archive, ds_name, datastore, pos, len, false);
 		return;
-	}
-
-	if (*name == 185182019423013513u) {
-		printf("camera stuff");
 	}
 
 	subhook::ScopedHookRemove scoped_remove(&hook);
@@ -122,18 +128,71 @@ static void hook_load(try_open_t orig, subhook::Hook& hook, void* this_, void* a
 
 	// Read the probably_not_loaded_flag to see if this archive failed to load - if so try again but also
 	// look for hooks with the fallback bit set
-	bool probably_not_loaded_flag = *(bool*)((char*)archive + 0x38);
-	if (probably_not_loaded_flag)
+	if (archive->probablyNotLoadedFlag)
 	{
 		if (hook_asset_load(blt::idfile(*name, *type), &datastore, &pos, &len, ds_name, true))
 		{
-			PDString pd_name(ds_name);
-			Archive_ctor((Archive*) archive, &pd_name, datastore, pos, len, false);
+			Archive::Constructor(archive, ds_name, datastore, pos, len, false);
 			return;
 		}
 	}
+
+	// At this point, we just need to perform conversion for 32-bit assets.
+	//
+	// The assets loaded from crates are either a ConstMemoryDataStore, or a FileDataStore pointing to some
+	// non-zero offset within a crate file. It's unlikely we'll get a ConstMemoryDataStore here as the file
+	// is 'upgraded' to that after being read, but check for it just in case.
+	//
+	// By comparison, a file loaded from DB:create_entry or mod_overrides will be a FileDataStore with
+	// a position of zero.
+
+	// No file?
+	if (!archive->datastore)
+		return;
+
+	// Not a file store, or pointing somewhere inside a crate file?
+	if (!IsFileDataStore(archive->datastore) || archive->position)
+		return;
+
+	// This is a file loaded from an external file. Depending on the type, inject our converter.
+
+	if (SCRIPTDATA_TYPES.contains(*type))
+	{
+		ConvertData(archive, ConvertScriptData);
+
+		// char msg[100];
+		// snprintf(msg, sizeof(msg), "Loading %016llx.%016llx", *name, *type);
+		// RAIDHOOK_LOG_LOG(msg);
+
+		// Don't attempt any further format conversion.
+		return;
+	}
+
+	if (*type == blt::idstring_hash("bnk"))
+	{
+		// The soundbanks can be quite big, so it's probably best not to load them into memory
+		// immediately ourselves if they're already 64-bit.
+		// (though the game will ultimately do this anyway, we're just saving a memcpy)
+		if (CheckWwiseSoundbankRequiresConversion(archive->datastore))
+		{
+			ConvertData(archive, ConvertWwiseSoundbank);
+		}
+
+		// Don't attempt any further format conversion.
+		return;
+	}
+
+	if(*type == blt::idstring_hash("animation"))
+	{
+		// HW12Dev: It's okay to read them all and decompress them from crates anyways, the memory usage is the same either way
+
+		ConvertData(archive, ConvertAnimation);
+
+		// Don't attempt any further format conversion.
+		return;
+	}
 }
 
-static void setup_extra_asset_hooks() {}
-
-#define HOOK_OPTION subhook::HookOptions::HookOption64BitOffset
+static void setup_extra_asset_hooks()
+{
+}

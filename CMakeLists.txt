@@ -12,8 +12,8 @@ enable_language(ASM_MASM)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_EXTENSIONS OFF)
 set(CMAKE_C_STANDARD_REQUIRED ON)
-# Use C++ 20, no gnu ext
-set(CMAKE_CXX_STANDARD 20)
+# Use C++ 23, no gnu ext
+set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
@@ -43,7 +43,7 @@ target_include_directories(mxml PUBLIC lib/mxml)
 
 file(GLOB_RECURSE wren_sources
 	# Public source file
-	lib/wren/src/include/wren.h 
+	lib/wren/src/include/wren.h
 	# Core VM files
 	lib/wren/src/vm/*.c
 	lib/wren/src/vm/*.h
@@ -91,6 +91,7 @@ add_library(SuperBLT STATIC ${sources})
 target_compile_options(SuperBLT PRIVATE
 	-DCURL_STATICLIB
 	-DSUBHOOK_STATIC
+	-DWIN32_LEAN_AND_MEAN
 )
 
 # General optimisation breaks calls to certain lua functions, so replace it.
@@ -274,22 +275,57 @@ target_link_libraries(SuperBLT lua51)
 
 
 
+#### DieselEngineFormats ####
+
+add_library(DieselEngineFormats STATIC
+	lib/DieselFormats/dieselformats/src/diesel/modern/scriptdata.cpp
+	lib/DieselFormats/dieselformats/src/diesel/modern/hash.cpp
+	lib/DieselFormats/dieselformats/src/diesel/modern/modern_shared.cpp
+    lib/DieselFormats/dieselformats/src/diesel/shared.cpp
+    lib/DieselFormats/dieselformats/src/diesel/animation.cpp
+    lib/DieselFormats/dieselformats/src/diesel/font.cpp
+
+	lib/DieselFormats/dieselformats/src/fileio/reader.cpp
+    lib/DieselFormats/dieselformats/src/fileio/writer.cpp
+    lib/DieselFormats/dieselformats/src/fileio/zlibcompression.cpp
+)
+target_include_directories(DieselEngineFormats PUBLIC lib/DieselFormats/dieselformats/src)
+target_link_libraries(DieselEngineFormats PRIVATE zlib-ng)
+target_link_libraries(SuperBLT DieselEngineFormats)
+
+
+#### diesel-wwise-bnk-version-converter ####
+
+file(GLOB_RECURSE wwise_converter_sources lib/diesel-wwise-bnk-version-converter/DieselWwiseSoundbank/src/*.cpp)
+add_library(diesel-wwise-bnk-version-converter STATIC ${wwise_converter_sources})
+target_include_directories(diesel-wwise-bnk-version-converter PRIVATE lib/diesel-wwise-bnk-version-converter/DieselWwiseSoundbank/src)
+# Include some namespace in the public include path, even if DieselWwiseSoundbank/src/ is ugly
+target_include_directories(diesel-wwise-bnk-version-converter PUBLIC lib/diesel-wwise-bnk-version-converter)
+target_link_libraries(SuperBLT diesel-wwise-bnk-version-converter)
+
 ###############################################################################
 ## loader binary (this generates a seperate target for both Windows loaders) ##
 ###############################################################################
 
-# Define the macro
-macro(Add_Loader library_name)
-	add_library(${library_name} SHARED ${ARGN})
-	target_link_libraries(${library_name} LINK_PRIVATE SuperBLT)
-endmacro()
+set(LOADER_GEN_ASM "${CMAKE_CURRENT_BINARY_DIR}/loader/loader_asm.gen.asm")
+set(LOADER_GEN_H "${CMAKE_CURRENT_BINARY_DIR}/loader/loader_asm.gen.h")
+set(LOADER_GEN_DEF "${CMAKE_CURRENT_BINARY_DIR}/loader/loader_asm.gen.def")
+add_custom_command(
+	OUTPUT "${LOADER_GEN_ASM}" "${LOADER_GEN_H}" "${LOADER_GEN_DEF}"
+	COMMAND ${Python3_EXECUTABLE} loader/generate_asm.py --asm "${LOADER_GEN_ASM}" --header "${LOADER_GEN_H}" --def "${LOADER_GEN_DEF}"
+	MAIN_DEPENDENCY loader/generate_asm.py
+	DEPENDS loader/iphp.def loader/wsock.def
+	WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+	VERBATIM
+)
 
-Add_Loader("IPHLPAPI" loader/loader.asm loader/iphp.cpp loader/iphp.def src/Resource.rc)
-Add_Loader("WSOCK32" loader/loader.asm loader/wsock.cpp loader/wsock.def src/Resource.rc)
+add_library(WSOCK32 SHARED loader/loader.cpp loader/loader_manual_asm.asm src/Resource.rc "${LOADER_GEN_ASM}" "${LOADER_GEN_DEF}")
+target_link_libraries(WSOCK32 LINK_PRIVATE SuperBLT)
+target_include_directories(WSOCK32 PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/loader")
 
 set_property(SOURCE loader/loader.asm PROPERTY LANGUAGE ASM_MASM)
+set_property(SOURCE "${LOADER_GEN_ASM}" PROPERTY LANGUAGE ASM_MASM)
 
-target_compile_options(IPHLPAPI PRIVATE -DBLT_USE_IPHLPAPI)
 target_compile_options(WSOCK32 PRIVATE -DBLT_USE_WSOCK)
 
 ###############################################################################

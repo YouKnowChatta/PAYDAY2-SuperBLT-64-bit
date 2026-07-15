@@ -1,15 +1,15 @@
 #include "platform.h"
 
+#include "assets/assets.h"
 #include "console/console.h"
 #include "signatures/signatures.h"
-#include "assets/assets.h"
 #include <util/util.h>
 
-#include <fstream>
-#include <string>
-#include <stdlib.h>
-#include <format>
 #include <filesystem>
+#include <format>
+#include <fstream>
+#include <stdlib.h>
+#include <string>
 
 #define WIN32_LEAN_AND_MEAN 1
 #include <Windows.h>
@@ -24,16 +24,7 @@ blt::idstring *blt::platform::last_loaded_name = idstring_none, *blt::platform::
 
 void blt::platform::InitPlatform()
 {
-	ifstream infiledebug("mods/debugger.txt");
-	if (infiledebug.good())
-	{
-		MessageBox(NULL, "Debug Me", "Debug Me", MB_OK);
-	}
-
 	// Set up logging first, so we can see messages from the signature search process
-#ifdef INJECTABLE_BLT
-	gbl_mConsole = new CConsole();
-#else
 	ifstream infileconsole("mods/developer.txt");
 	string debug_mode;
 	if (infileconsole.good())
@@ -48,7 +39,6 @@ void blt::platform::InitPlatform()
 
 	if (debug_mode != "disabled")
 		console = new CConsole();
-#endif
 
 	// remove left over dll if it exists
 	if (std::filesystem::exists("WSOCK32.dll.old"))
@@ -91,7 +81,7 @@ void blt::platform::InitPlatform()
 					MessageBox(0, std::format("Error: {}", GetLastError()).c_str(), "SBLT DLL Downloader", MB_OK);
 				}
 			}
-			
+
 			exit(0);
 		}
 		if (ret == 3) // updater self updated
@@ -102,8 +92,11 @@ void blt::platform::InitPlatform()
 
 	if (!SignatureSearch::Search())
 	{
-		MessageBox(nullptr, "This SuperBLT version is not compatible with your current game version. The game will be started without SuperBLT.", "SuperBLT version incompatible", MB_OK);
-		
+		MessageBox(nullptr,
+		           "This SuperBLT version is not compatible with your current game version. The game will be started "
+		           "without SuperBLT.",
+		           "SuperBLT version incompatible", MB_OK);
+
 		if (console)
 			console->Close(true);
 		return;
@@ -121,15 +114,15 @@ void blt::platform::ClosePlatform()
 	delete console;
 }
 
-void blt::platform::GetPlatformInformation(lua_State * L)
+void blt::platform::GetPlatformInformation(lua_State* L)
 {
-	lua_pushstring(L, "mswindows");
+	lua_pushstring(L, "win64");
 	lua_setfield(L, -2, "platform");
 
 	lua_pushstring(L, "x86-64");
 	lua_setfield(L, -2, "arch");
 
-	//lua_pushstring(L, "raid");
+	// lua_pushstring(L, "raid");
 	lua_pushstring(L, "pd2");
 	lua_setfield(L, -2, "game");
 }
@@ -142,13 +135,15 @@ void blt::platform::win32::OpenConsole()
 	}
 }
 
-void * blt::platform::win32::get_lua_func(const char* name)
+void* blt::platform::win32::get_lua_func(const char* name)
 {
 	// Only allow getting the Lua functions
-	if (strncmp(name, "lua", 3)) return NULL;
+	if (strncmp(name, "lua", 3))
+		return NULL;
 
 	// Don't allow getting the setup functions
-	if (!strncmp(name, "luaL_newstate", 13)) return NULL;
+	if (!strncmp(name, "luaL_newstate", 13))
+		return NULL;
 
 	return SignatureSearch::GetFunctionByName(name);
 }
@@ -163,7 +158,8 @@ bool blt::platform::lua::GetForcePCalls()
 void blt::platform::lua::SetForcePCalls(bool state)
 {
 	// Don't change if already set up
-	if (state == GetForcePCalls()) return;
+	if (state == GetForcePCalls())
+		return;
 
 	if (state)
 	{
